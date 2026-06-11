@@ -1,0 +1,19 @@
+{
+  "name": "vito-portfolio-3d",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Interactive 3D portfolio of Vito Di Grigoli — drive an Ape around a low-poly Sicilian island.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.165.0"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.60.0",
+    "vite": "^5.3.1"
+  }
+}

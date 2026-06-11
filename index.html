@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="description" content="Vito Di Grigoli — web developer from Sicily. Drive around a 3D island to explore his work." />
+  <meta name="theme-color" content="#1a2f4a" />
+  <title>Vito Di Grigoli — Web Developer · Sicily</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>🛵</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <canvas id="webgl"></canvas>
+
+  <!-- Loading screen: a Sicilian sunset -->
+  <div id="loader">
+    <div class="ls-scene" aria-hidden="true">
+      <div class="ls-sun"></div>
+      <div class="ls-sea">
+        <div class="ls-glint"></div>
+      </div>
+      <div class="ls-cloud ls-c1"></div>
+      <div class="ls-cloud ls-c2"></div>
+      <div class="ls-cloud ls-c3"></div>
+      <div class="ls-wave ls-w1"></div>
+      <div class="ls-wave ls-w2"></div>
+    </div>
+    <div class="loader-inner">
+      <div class="loader-kicker">portfolio · drive through my work</div>
+      <h1 class="loader-title" id="loader-title">VITO DI GRIGOLI</h1>
+      <div class="loader-sub">web developer · sicily, italy</div>
+      <div class="loader-bar">
+        <div class="loader-bar-fill" id="loader-fill"></div>
+        <div class="loader-vespa" id="loader-vespa">🛵</div>
+      </div>
+      <div class="loader-pct" id="loader-pct">0%</div>
+      <button id="start-btn" disabled>Start the engine</button>
+      <div class="loader-hint" id="loader-hint"></div>
+    </div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="hud-name">VITO DI GRIGOLI <span>· web developer</span></div>
+    <div id="hud-controls">
+      <button id="sound-btn" title="Toggle ambient sound" aria-label="Toggle sound">🔇</button>
+      <button id="reset-btn" title="Back to the piazza" aria-label="Reset position">⟲</button>
+    </div>
+    <div id="hud-hint"></div>
+  </div>
+
+  <!-- Info panel (zones / projects) -->
+  <div id="panel" class="hidden">
+    <button id="panel-close" aria-label="Close">✕</button>
+    <div id="panel-tag"></div>
+    <h2 id="panel-title"></h2>
+    <div id="panel-body"></div>
+    <div id="panel-links"></div>
+  </div>
+
+  <!-- Touch joystick (mobile) -->
+  <div id="joystick" class="hidden">
+    <div id="joystick-knob"></div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
