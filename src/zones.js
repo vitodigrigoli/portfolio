@@ -99,8 +99,8 @@ export class Zones {
     g.rotation.y = 0.6;
     this.scene.add(g);
 
-    this.world.addCollider(X, Z, 5.6);
-    this.world.addCollider(X - 5.3, Z + 3.6, 2.6); // pergola
+    this.world.addCollider(X, Z, 4.6);
+    this.world.addCollider(X - 5.3, Z + 3.6, 2.4); // pergola
     this.#addSign('ABOUT', X, 8.2, Z);
     this.triggers.push({ x: X, z: Z, r: 12, content: CONTENT.about });
   }
@@ -139,7 +139,7 @@ export class Zones {
       col.traverse((o) => { if (o.isMesh) o.castShadow = true; });
       col.position.set(sx, 0, sz);
       this.scene.add(col);
-      this.world.addCollider(sx, sz, 1.1);
+      this.world.addCollider(sx, sz, 0.8);
 
       const label = makeTextPlane(skill, { size: 0.62, color: '#2b1d12', bg: 'rgba(253,246,236,0.92)' });
       label.position.set(sx, 4.5, sz);
@@ -177,7 +177,7 @@ export class Zones {
     temple.position.set(X, 0, Z);
     temple.rotation.y = 0.35;
     this.scene.add(temple);
-    this.world.addCollider(X, Z, 4.6);
+    this.world.addCollider(X, Z, 4.0);
 
     this.#addSign('SKILLS', X, 9, Z);
     this.triggers.push({ x: X, z: Z, r: 14, content: CONTENT.skills });
@@ -188,16 +188,16 @@ export class Zones {
   #projectsSite() {
     // the four projects stand on the orchestra of a Greek theater (Siracusa)
     const district = [
-      { p: PROJECTS[0], x: 30, z: 22 },   // Congresso ANFI
-      { p: PROJECTS[1], x: 44, z: 20 },   // GeForge
-      { p: PROJECTS[2], x: 48, z: 32 },   // Artieri 1895
-      { p: PROJECTS[3], x: 32, z: 36 },   // Dottor Diego Tona
+      { p: PROJECTS[0], x: 30, z: 22, cr: 2.0 },   // Congresso ANFI
+      { p: PROJECTS[1], x: 44, z: 20, cr: 3.0 },   // GeForge
+      { p: PROJECTS[2], x: 48, z: 32, cr: 2.3 },   // Artieri 1895
+      { p: PROJECTS[3], x: 32, z: 36, cr: 2.3 },   // Dottor Diego Tona
     ];
 
     this.#addSign('PROJECTS', 38, 10.5, 27, { size: 2 });
     this.#theaterCavea(38, 27);
 
-    for (const { p, x, z } of district) {
+    for (const { p, x, z, cr } of district) {
       const g = new THREE.Group();
       const accent = new THREE.MeshStandardMaterial({
         color: p.color, roughness: 0.5, emissive: p.color, emissiveIntensity: 0.18,
@@ -331,7 +331,7 @@ export class Zones {
       g.position.set(x, 0, z);
       g.lookAt(0, 0, 0);
       this.scene.add(g);
-      this.world.addCollider(x, z, 3.4);
+      this.world.addCollider(x, z, cr);
 
       const label = makeTextPlane(p.short, {
         size: 0.85,
@@ -445,7 +445,7 @@ export class Zones {
 
     g.position.set(X, 0, Z);
     this.scene.add(g);
-    this.world.addCollider(X, Z, 2.6);
+    this.world.addCollider(X, Z, 2.2);
 
     this.#addSign('CONTACT', X, 16, Z);
     this.triggers.push({ x: X, z: Z, r: 11, content: CONTENT.contact });

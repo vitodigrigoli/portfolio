@@ -199,7 +199,8 @@ html, body {
   animation-delay: calc(150ms + var(--i) * 50ms);
 }
 
-.loader-title .sp { width: 0.55em; }
+.loader-title .sp { width: 0.55em; display: inline-block; }
+.loader-title .word { display: inline-block; white-space: nowrap; }
 
 @keyframes ls-rise {
   from { opacity: 0; transform: translateY(26px); filter: blur(5px); }
@@ -532,6 +533,11 @@ html, body {
     padding: 24px 22px 20px;
   }
   #panel.show { transform: translateX(50%) translateY(0); }
+  /* on touch devices the joystick lives at the bottom — keep the panel above it */
+  body.touch #panel {
+    bottom: 184px;
+    max-height: min(46vh, calc(100vh - 254px));
+  }
   #hud-name { font-size: 0.78rem; }
   #hud-name span { display: none; }
   #hud-hint { bottom: 178px; font-size: 0.78rem; }

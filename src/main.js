@@ -43,15 +43,19 @@ const vespaEl = document.getElementById('loader-vespa');
 const startBtn = document.getElementById('start-btn');
 const loaderHint = document.getElementById('loader-hint');
 const isTouch = window.matchMedia('(pointer: coarse)').matches;
+if (isTouch) document.body.classList.add('touch');
 loaderHint.textContent = isTouch ? HINTS.mobile : HINTS.desktop;
 
-// split the title into letters for the staggered reveal
+// split the title into letters for the staggered reveal; letters are grouped
+// per word so line breaks can only happen between words, never inside one
 const titleEl = document.getElementById('loader-title');
-titleEl.innerHTML = [...titleEl.textContent]
-  .map((ch, i) => ch === ' '
-    ? '<span class="sp"></span>'
-    : `<span style="--i:${i}">${ch}</span>`)
-  .join('');
+let letterIndex = 0;
+titleEl.innerHTML = titleEl.textContent.trim().split(/\s+/)
+  .map((word) =>
+    `<span class="word">${[...word]
+      .map((ch) => `<span style="--i:${letterIndex++}">${ch}</span>`)
+      .join('')}</span>`)
+  .join('<span class="sp"></span>');
 
 function setProgress(p) {
   const pct = Math.round(p * 100);
@@ -119,6 +123,15 @@ soundBtn.addEventListener('click', () => {
 });
 
 resetBtn.addEventListener('click', () => vehicle.reset());
+
+const nightBtn = document.getElementById('night-btn');
+let night = false;
+nightBtn.addEventListener('click', () => {
+  night = !night;
+  world.setNight(night);
+  vehicle.setNight(night);
+  nightBtn.textContent = night ? '☀️' : '🌙';
+});
 
 let started = false;
 startBtn.addEventListener('click', () => {

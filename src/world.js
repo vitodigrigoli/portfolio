@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { coastRadius, inlandDepth } from './sicily.js';
+import { makeTextPlane } from './textTexture.js';
 
 // The island itself — shaped like Sicily: terrain, sea, sky, Mount Etna on
 // the east coast, olive groves, village houses, rocks, clouds. Registers
@@ -32,14 +33,15 @@ function noise2(x, z) {
 }
 
 // landmark sites (kept clear of vegetation): real Sicilian monuments in
-// roughly their real positions on the island
+// roughly their real positions on the island. `r` is the vegetation
+// clearance, `c` the physical collider matched to the visible footprint
 const MONUMENTS = [
-  { x: -20, z: -30, r: 12 },  // Duomo di Cefalù
-  { x: -60, z: -2, r: 12 },   // Teatro Massimo (Palermo)
-  { x: 66, z: -30, r: 10 },   // Campanile del Duomo (Messina)
-  { x: 62, z: 2, r: 10 },     // U Liotru (Catania)
-  { x: -14, z: 40, r: 16 },   // Scala dei Turchi (Realmonte)
-  { x: -66, z: 18, r: 12 },   // Saline di Trapani
+  { x: -20, z: -30, r: 12, c: 3.8 },  // Duomo di Cefalù
+  { x: -60, z: -2, r: 12, c: 4.2 },   // Teatro Massimo (Palermo)
+  { x: 66, z: -30, r: 10, c: 1.9 },   // Campanile del Duomo (Messina)
+  { x: 62, z: 2, r: 10, c: 2.2 },     // U Liotru (Catania)
+  { x: -14, z: 40, r: 16, c: 5 },     // Scala dei Turchi (Realmonte)
+  { x: -66, z: 18, r: 12, c: 2.1 },   // Saline di Trapani
 ];
 
 export class World {
@@ -47,6 +49,8 @@ export class World {
     this.scene = scene;
     this.colliders = [];
     this.animated = []; // {update(t, dt)}
+    this.nightLights = []; // lamppost point lights, lit only at night
+    this.isNight = false;
 
     this.#sky();
     this.#lights();
@@ -54,6 +58,8 @@ export class World {
     this.#sea();
     this.#etna();
     this.#piazza();
+    this.#signposts();
+    this.#lampposts();
     this.#paths();
     this.#oliveGrove();
     this.#pricklyPears();
@@ -72,43 +78,87 @@ export class World {
 
   /* ---------- sky & light ---------- */
 
-  #sky() {
-    // golden-hour gradient dome
+  #skyTexture(stops) {
     const canvas = document.createElement('canvas');
     canvas.width = 2;
     canvas.height = 256;
     const ctx = canvas.getContext('2d');
     const grad = ctx.createLinearGradient(0, 0, 0, 256);
-    grad.addColorStop(0.0, '#2c5d8f');
-    grad.addColorStop(0.45, '#7fb2d9');
-    grad.addColorStop(0.72, '#f5c97b');
-    grad.addColorStop(1.0, '#f0975a');
+    for (const [offset, color] of stops) grad.addColorStop(offset, color);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 2, 256);
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
 
-    const dome = new THREE.Mesh(
-      new THREE.SphereGeometry(900, 24, 12),
-      new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false })
-    );
+  #sky() {
+    // gradient domes: golden hour by day, deep blue at night
+    this.dayTex = this.#skyTexture([
+      [0.0, '#2c5d8f'], [0.45, '#7fb2d9'], [0.72, '#f5c97b'], [1.0, '#f0975a'],
+    ]);
+    this.nightTex = this.#skyTexture([
+      [0.0, '#04070f'], [0.5, '#0a1226'], [0.78, '#16223e'], [1.0, '#26304e'],
+    ]);
+
+    this.domeMat = new THREE.MeshBasicMaterial({ map: this.dayTex, side: THREE.BackSide, fog: false });
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(900, 24, 12), this.domeMat);
     this.scene.add(dome);
 
     this.scene.fog = new THREE.Fog(0xf0b27a, 160, 800);
 
     // low sun disc on the horizon
-    const sun = new THREE.Mesh(
+    this.sunDisc = new THREE.Mesh(
       new THREE.CircleGeometry(38, 32),
       new THREE.MeshBasicMaterial({ color: 0xffe9b8, fog: false })
     );
-    sun.position.set(-380, 60, -680);
-    sun.lookAt(0, 40, 0);
-    this.scene.add(sun);
+    this.sunDisc.position.set(-380, 60, -680);
+    this.sunDisc.lookAt(0, 40, 0);
+    this.scene.add(this.sunDisc);
+
+    // moon, hidden until night falls
+    this.moonDisc = new THREE.Mesh(
+      new THREE.CircleGeometry(24, 32),
+      new THREE.MeshBasicMaterial({ color: 0xeef2fa, fog: false })
+    );
+    this.moonDisc.position.set(320, 180, -620);
+    this.moonDisc.lookAt(0, 40, 0);
+    this.moonDisc.visible = false;
+    this.scene.add(this.moonDisc);
+
+    // starfield scattered on the upper dome — own PRNG so it doesn't shift
+    // the deterministic placement of trees, rocks and clouds
+    let starSeed = 4242;
+    const srand = () => {
+      starSeed = (starSeed * 16807) % 2147483647;
+      return (starSeed - 1) / 2147483646;
+    };
+    const starCount = 360;
+    const starPos = new Float32Array(starCount * 3);
+    for (let i = 0; i < starCount; i++) {
+      const a = srand() * Math.PI * 2;
+      const elev = 0.12 + srand() * 0.8; // keep stars off the horizon line
+      const r = 850;
+      const y = r * Math.sin(elev * Math.PI / 2);
+      const rr = r * Math.cos(elev * Math.PI / 2);
+      starPos.set([Math.cos(a) * rr, y, Math.sin(a) * rr], i * 3);
+    }
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+    this.stars = new THREE.Points(
+      starGeo,
+      new THREE.PointsMaterial({
+        color: 0xcdd8ee, size: 1.8, sizeAttenuation: false,
+        transparent: true, opacity: 0.85, fog: false,
+      })
+    );
+    this.stars.visible = false;
+    this.scene.add(this.stars);
   }
 
   #lights() {
-    const hemi = new THREE.HemisphereLight(0xbfd9ee, 0xc98850, 0.85);
-    this.scene.add(hemi);
+    this.hemi = new THREE.HemisphereLight(0xbfd9ee, 0xc98850, 0.85);
+    this.scene.add(this.hemi);
 
     const sun = new THREE.DirectionalLight(0xffdfae, 1.9);
     sun.position.set(-90, 110, -140);
@@ -122,6 +172,7 @@ export class World {
     sun.shadow.camera.far = 400;
     sun.shadow.bias = -0.0008;
     this.scene.add(sun);
+    this.sunLight = sun;
   }
 
   /* ---------- ground & water ---------- */
@@ -186,6 +237,7 @@ export class World {
     const sea = new THREE.Mesh(geo, mat);
     sea.position.y = -1.1;
     this.scene.add(sea);
+    this.seaMat = mat;
 
     const pos = geo.attributes.position;
     const base = pos.array.slice();
@@ -372,11 +424,137 @@ export class World {
     crate2.rotation.y = 0.35;
     cart.add(crate2);
 
+    // the cart sits along the road toward Etna, leaving the piazza
+    // open for the direction signs
     cart.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-    cart.position.set(0, 0, -4);
-    cart.rotation.y = 0.5;
+    cart.position.set(26, 0, -6);
+    cart.rotation.y = 1.1;
     this.scene.add(cart);
-    this.addCollider(0, -4, 2.8);
+    this.addCollider(26, -6, 2.8);
+  }
+
+  #signposts() {
+    // wooden direction post in the middle of the piazza: one arrow per zone
+    const woodM = new THREE.MeshStandardMaterial({ color: 0x6e5440, roughness: 1 });
+    const plankM = new THREE.MeshStandardMaterial({ color: 0x9a7a52, roughness: 0.95 });
+    const PX = 0, PZ = -5;
+
+    const post = new THREE.Group();
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 3.6, 8), woodM);
+    pole.position.y = 1.8;
+    post.add(pole);
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), woodM);
+    cap.position.y = 3.62;
+    post.add(cap);
+
+    const targets = [
+      { label: 'ABOUT', x: -38, z: -18 },
+      { label: 'SKILLS', x: -34, z: 24 },
+      { label: 'PROJECTS', x: 38, z: 27 },
+      { label: 'CONTACT', x: -84, z: 6 },
+    ];
+
+    targets.forEach((t, i) => {
+      const arm = new THREE.Group();
+      arm.position.y = 3.15 - i * 0.55;
+      // local +x must point at the target
+      arm.rotation.y = Math.atan2(-(t.z - PZ), t.x - PX);
+
+      const plank = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.42, 0.08), plankM);
+      plank.position.x = 0.95;
+      arm.add(plank);
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.29, 0.34, 4), plankM);
+      tip.rotation.z = -Math.PI / 2;
+      tip.rotation.x = Math.PI / 4;
+      tip.position.x = 2.02;
+      arm.add(tip);
+
+      for (const side of [1, -1]) {
+        const text = makeTextPlane(t.label, { size: 0.26, color: '#fdf6ec', bg: null });
+        text.position.set(0.95, 0, side * 0.06);
+        if (side < 0) text.rotation.y = Math.PI;
+        arm.add(text);
+      }
+      post.add(arm);
+    });
+
+    post.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    post.position.set(PX, 0, PZ);
+    this.scene.add(post);
+    this.addCollider(PX, PZ, 0.5);
+  }
+
+  #lampposts() {
+    // cast-iron street lamps: warm bulbs + point lights that only come on
+    // when night mode is toggled
+    const ironM = new THREE.MeshStandardMaterial({ color: 0x2e3438, roughness: 0.7 });
+    this.bulbMat = new THREE.MeshStandardMaterial({
+      color: 0xfff1c4, emissive: 0xffc66a, emissiveIntensity: 0.12, roughness: 0.4,
+    });
+
+    const spots = [
+      [9, 9], [-9, 9], [9, -9], [-9, -9],  // around the piazza
+      [-33, -13],   // by the house (about)
+      [-24, 16],    // by the temple (skills)
+      [24, 17],     // at the theater entrance (projects)
+      [-80, 3],     // by the lighthouse (contact)
+      [22, -2],     // by the cart
+    ];
+
+    for (const [x, z] of spots) {
+      const lamp = new THREE.Group();
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 0.5, 8), ironM);
+      base.position.y = 0.25;
+      lamp.add(base);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 3.1, 8), ironM);
+      pole.position.y = 1.95;
+      lamp.add(pole);
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), this.bulbMat);
+      bulb.position.y = 3.62;
+      lamp.add(bulb);
+      const hood = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.32, 8), ironM);
+      hood.position.y = 3.86;
+      lamp.add(hood);
+      const finial = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5), ironM);
+      finial.position.y = 4.05;
+      lamp.add(finial);
+
+      const light = new THREE.PointLight(0xffc66a, 0, 17, 1.8);
+      light.position.y = 3.5;
+      lamp.add(light);
+      this.nightLights.push(light);
+
+      lamp.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+      lamp.position.set(x, 0, z);
+      this.scene.add(lamp);
+      this.addCollider(x, z, 0.4);
+    }
+  }
+
+  /* ---------- day / night ---------- */
+
+  setNight(on) {
+    this.isNight = on;
+
+    this.domeMat.map = on ? this.nightTex : this.dayTex;
+    this.scene.fog.color.set(on ? 0x0e1726 : 0xf0b27a);
+
+    this.hemi.color.set(on ? 0x33415e : 0xbfd9ee);
+    this.hemi.groundColor.set(on ? 0x16121c : 0xc98850);
+    this.hemi.intensity = on ? 0.4 : 0.85;
+
+    // the directional light becomes moonlight
+    this.sunLight.color.set(on ? 0x8fa8d8 : 0xffdfae);
+    this.sunLight.intensity = on ? 0.6 : 1.9;
+
+    this.sunDisc.visible = !on;
+    this.moonDisc.visible = on;
+    this.stars.visible = on;
+
+    this.seaMat.color.set(on ? 0x123a55 : 0x2387ab);
+    this.bulbMat.emissiveIntensity = on ? 1.7 : 0.12;
+    // three r155+ physical units: point lights need candela-scale intensity
+    for (const l of this.nightLights) l.intensity = on ? 50 : 0;
   }
 
   #paths() {
@@ -473,7 +651,7 @@ export class World {
         );
         blobs.setMatrixAt(bi++, m);
       }
-      this.addCollider(s.x, s.z, 0.9);
+      this.addCollider(s.x, s.z, 0.7);
     });
     this.scene.add(trunks, blobs);
   }
@@ -533,12 +711,12 @@ export class World {
     const terracotta = new THREE.MeshStandardMaterial({ color: 0xc4593a, roughness: 0.9, flatShading: true });
     const dark = new THREE.MeshStandardMaterial({ color: 0x3c3c44, roughness: 0.85 });
 
-    const place = (group, { x, z, r }, ry = 0) => {
+    const place = (group, { x, z, c }, ry = 0) => {
       group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
       group.position.set(x, 0, z);
       group.rotation.y = ry;
       this.scene.add(group);
-      this.addCollider(x, z, r * 0.55);
+      this.addCollider(x, z, c);
     };
 
     /* --- Duomo di Cefalù: Norman facade with twin towers --- */
@@ -696,8 +874,8 @@ export class World {
       g.lookAt(m.x * 1.8, -2.4, m.z * 1.8);
       g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
       this.scene.add(g);
-      this.addCollider(m.x, m.z, 5);
-      this.addCollider(m.x + 2, m.z + 4, 4);
+      this.addCollider(m.x, m.z, m.c);
+      this.addCollider(m.x + 2, m.z + 4, 3.5);
     }
 
     /* --- Saline di Trapani: windmill + salt cones --- */

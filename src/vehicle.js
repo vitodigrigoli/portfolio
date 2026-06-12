@@ -10,7 +10,7 @@ export class Vehicle {
     this.position = new THREE.Vector3(0, 0, 8);
     this.heading = Math.PI;              // facing the camera spawn-side
     this.speed = 0;
-    this.radius = 1.0;
+    this.radius = 0.7;
 
     this.maxSpeed = 18;
     this.maxReverse = -6;
@@ -85,11 +85,20 @@ export class Vehicle {
       steer.add(grip);
     }
 
-    // round headlight
-    const headlight = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), cream);
+    // round headlight (own material so it can glow at night)
+    this.headlightMat = cream.clone();
+    const headlight = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), this.headlightMat);
     headlight.scale.set(1, 1, 0.7);
     headlight.position.set(0, 1.32, -0.06);
     steer.add(headlight);
+
+    // headlight beam, switched on in night mode (forward is local -z)
+    this.headlightBeam = new THREE.SpotLight(0xffe9b0, 0, 34, Math.PI / 5, 0.5, 1.4);
+    this.headlightBeam.position.set(0, 1.32, -0.2);
+    const beamTarget = new THREE.Object3D();
+    beamTarget.position.set(0, 0.3, -10);
+    this.headlightBeam.target = beamTarget;
+    steer.add(this.headlightBeam, beamTarget);
 
     // little round mirror
     const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.3, 6), chrome);
@@ -139,26 +148,47 @@ export class Vehicle {
     seat.position.set(0, 1.12, 0.45);
     lean.add(seat);
 
-    // rear rack with a lemon crate and a helmet — andiamo
+    // rear rack with a helmet — andiamo
     const rack = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.04, 0.45), chrome);
     rack.position.set(0, 1.06, 1.28);
     lean.add(rack);
-    const crate = new THREE.Mesh(
-      new THREE.BoxGeometry(0.42, 0.26, 0.4),
-      new THREE.MeshStandardMaterial({ color: 0xb98a4e, roughness: 0.9 })
-    );
-    crate.position.set(0, 1.21, 1.28);
-    lean.add(crate);
-    const lemons = new THREE.Mesh(
-      new THREE.SphereGeometry(0.2, 8, 6),
-      new THREE.MeshStandardMaterial({ color: 0xf7d633, roughness: 0.6 })
-    );
-    lemons.scale.set(1, 0.5, 1);
-    lemons.position.set(0, 1.36, 1.28);
-    lean.add(lemons);
     const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), cream);
     helmet.position.set(0, 1.14, 0.85);
     lean.add(helmet);
+
+    // rear license plate with the tricolore
+    const plateCanvas = document.createElement('canvas');
+    plateCanvas.width = 128;
+    plateCanvas.height = 80;
+    const pctx = plateCanvas.getContext('2d');
+    pctx.fillStyle = '#f4f4ee';
+    pctx.fillRect(0, 0, 128, 80);
+    pctx.fillStyle = '#009246';
+    pctx.fillRect(0, 0, 16, 80);
+    pctx.fillStyle = '#ce2b37';
+    pctx.fillRect(112, 0, 16, 80);
+    pctx.strokeStyle = '#1a1a1e';
+    pctx.lineWidth = 6;
+    pctx.strokeRect(0, 0, 128, 80);
+    pctx.fillStyle = '#1a1a1e';
+    pctx.font = '700 36px -apple-system, "Inter", sans-serif';
+    pctx.textAlign = 'center';
+    pctx.textBaseline = 'middle';
+    pctx.fillText('VITO', 64, 42);
+    const plateTex = new THREE.CanvasTexture(plateCanvas);
+    plateTex.colorSpace = THREE.SRGBColorSpace;
+
+    const plateBack = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.25, 0.03), dark);
+    plateBack.position.set(0, 0.68, 1.5);
+    plateBack.rotation.x = -0.08;
+    lean.add(plateBack);
+    const plate = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.34, 0.21),
+      new THREE.MeshStandardMaterial({ map: plateTex, roughness: 0.5 })
+    );
+    plate.position.set(0, 0.68, 1.52);
+    plate.rotation.x = -0.08;
+    lean.add(plate);
 
     // taillight
     const tailLight = new THREE.Mesh(
@@ -191,6 +221,13 @@ export class Vehicle {
     this.position.set(0, 0, 8);
     this.heading = Math.PI;
     this.speed = 0;
+  }
+
+  setNight(on) {
+    // three r155+ physical units: spotlight intensity is in candela
+    this.headlightBeam.intensity = on ? 90 : 0;
+    this.headlightMat.emissive.set(0xffe9b0);
+    this.headlightMat.emissiveIntensity = on ? 1.1 : 0;
   }
 
   update(dt, controls) {

@@ -97,7 +97,42 @@ const fps = await page.evaluate(() => new Promise((res) => {
 }));
 console.log('fps (headless/software renderer):', fps);
 
-// 6. mobile viewport check
+// 6b. signposts in the piazza (reverse a bit so they're in frame)
+await page.evaluate(() => {
+  const v = window.__vito.vehicle;
+  v.position.set(0, 0, 10);
+  v.heading = Math.PI;
+  v.speed = 0;
+});
+await page.waitForTimeout(1200);
+await page.screenshot({ path: `${OUT}/6-signposts.png` });
+
+// 6c. vespa rear: license plate (drive away from camera then stop)
+await page.keyboard.down('w');
+await page.waitForTimeout(700);
+await page.keyboard.up('w');
+await page.waitForTimeout(1100);
+await page.screenshot({ path: `${OUT}/6b-vespa-rear.png` });
+
+// 6d. night mode: toggle and screenshot piazza + lampposts
+await page.click('#night-btn');
+await page.waitForTimeout(600);
+await page.screenshot({ path: `${OUT}/7-night.png` });
+// cart's new spot, at night with headlight
+await page.evaluate(() => {
+  const v = window.__vito.vehicle;
+  v.position.set(20, 0, -2);
+  v.heading = -Math.PI / 2.5;
+  v.speed = 0;
+});
+await page.waitForTimeout(900);
+await page.screenshot({ path: `${OUT}/7b-night-cart.png` });
+await page.click('#night-btn'); // back to day
+await page.waitForTimeout(400);
+// cart in daylight
+await page.screenshot({ path: `${OUT}/8-cart-day.png` });
+
+// 6. mobile viewport check: loader title wrap + panel above joystick
 const mob = await (await browser.newContext({
   viewport: { width: 390, height: 844 },
   hasTouch: true,
@@ -106,9 +141,23 @@ const mob = await (await browser.newContext({
 mob.on('pageerror', (e) => errors.push(`mobile pageerror: ${e.message}`));
 await mob.goto('http://localhost:5173', { waitUntil: 'domcontentloaded' });
 await mob.waitForSelector('#start-btn.ready', { timeout: 30000 });
+await mob.screenshot({ path: `${OUT}/5-mobile-loader.png` });
 await mob.tap('#start-btn');
 await mob.waitForTimeout(2000);
 await mob.screenshot({ path: `${OUT}/5-mobile.png` });
+// teleport into the About trigger: panel must sit above the joystick
+await mob.evaluate(() => {
+  const v = window.__vito.vehicle;
+  v.position.set(-38, 0, -8);
+  v.speed = 0;
+});
+await mob.waitForSelector('#panel.show', { timeout: 5000 });
+await mob.waitForTimeout(700);
+const panelBox = await mob.locator('#panel').boundingBox();
+const joyBox = await mob.locator('#joystick').boundingBox();
+console.log('panel bottom:', panelBox.y + panelBox.height, '| joystick top:', joyBox.y,
+  '| overlap:', panelBox.y + panelBox.height > joyBox.y ? 'YES (BAD)' : 'no');
+await mob.screenshot({ path: `${OUT}/5b-mobile-panel.png` });
 
 console.log('JS errors:', errors.length ? errors : 'none');
 await browser.close();
