@@ -352,8 +352,9 @@ export class Zones {
     const stoneM = new THREE.MeshStandardMaterial({ color: 0xd9c09a, roughness: 1, flatShading: true });
     const openDir = Math.atan2(-cz, -cx); // toward the island center
     const arc = Math.PI * 2 * (240 / 360); // 240° of seats, 120° opening
-    const group = new THREE.Group();
 
+    // all the seats in one instanced draw (a unit box scaled per seat)
+    const seats = [];
     for (let row = 0; row < 4; row++) {
       const r = 15 + row * 2.4;
       const h = 0.85 + row * 0.62;
@@ -361,23 +362,34 @@ export class Zones {
       for (let i = 0; i < count; i++) {
         const phi = openDir + Math.PI - arc / 2 + (i + 0.5) * (arc / count);
         const w = (arc * r) / count + 0.15;
-        const seat = new THREE.Mesh(new THREE.BoxGeometry(w, h, 2.3), stoneM);
-        seat.position.set(cx + Math.cos(phi) * r, h / 2, cz + Math.sin(phi) * r);
-        seat.rotation.y = -(phi + Math.PI / 2);
-        seat.castShadow = true;
-        group.add(seat);
+        const x = cx + Math.cos(phi) * r;
+        const z = cz + Math.sin(phi) * r;
+        seats.push({ x, z, h, w, ry: -(phi + Math.PI / 2) });
         // colliders only on the outermost row, spaced out
-        if (row === 3 && i % 2 === 0) {
-          this.world.addCollider(seat.position.x, seat.position.z, 2.4);
-        }
+        if (row === 3 && i % 2 === 0) this.world.addCollider(x, z, 2.4);
       }
     }
+    const inst = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), stoneM, seats.length);
+    inst.castShadow = true;
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    seats.forEach((s, i) => {
+      e.set(0, s.ry, 0);
+      m.compose(
+        new THREE.Vector3(s.x, s.h / 2, s.z),
+        q.setFromEuler(e),
+        new THREE.Vector3(s.w, s.h, 2.3)
+      );
+      inst.setMatrixAt(i, m);
+    });
+    this.scene.add(inst);
+
     // inner row needs colliders too so the vehicle can't clip through seats
     for (let i = 0; i < 14; i++) {
       const phi = openDir + Math.PI - arc / 2 + (i + 0.5) * (arc / 14);
       this.world.addCollider(cx + Math.cos(phi) * 15, cz + Math.sin(phi) * 15, 2.2);
     }
-    this.scene.add(group);
   }
 
   /* ---------- Contact: the lighthouse pier ---------- */
@@ -408,14 +420,17 @@ export class Zones {
     );
     cage.position.y = 11.7;
     g.add(cage);
-    const lamp = new THREE.Mesh(
-      new THREE.SphereGeometry(0.7, 12, 8),
-      new THREE.MeshStandardMaterial({
-        color: 0xfff3c4, emissive: 0xffd76a, emissiveIntensity: 1.6, roughness: 0.2,
-      })
-    );
+    this.lampMat = new THREE.MeshStandardMaterial({
+      color: 0xfff3c4, emissive: 0xffd76a, emissiveIntensity: 1.6, roughness: 0.2,
+    });
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.7, 12, 8), this.lampMat);
     lamp.position.y = 11.7;
     g.add(lamp);
+
+    // actual light source, switched on at night (three r155+ candela units)
+    this.lighthouseLight = new THREE.PointLight(0xffd76a, 0, 70, 1.2);
+    this.lighthouseLight.position.y = 11.7;
+    g.add(this.lighthouseLight);
     const cap = new THREE.Mesh(new THREE.ConeGeometry(1.3, 1, 10), red);
     cap.position.y = 13;
     g.add(cap);
@@ -424,17 +439,25 @@ export class Zones {
     const beam = new THREE.Mesh(
       new THREE.CylinderGeometry(0.12, 2.4, 26, 10, 1, true),
       new THREE.MeshBasicMaterial({
-        color: 0xffe9a8, transparent: true, opacity: 0.16,
+        color: 0xffc94d, transparent: true, opacity: 0.16,
         side: THREE.DoubleSide, depthWrite: false,
       })
     );
     beam.rotation.z = Math.PI / 2;
+    this.beamMat = beam.material;
     const beamPivot = new THREE.Group();
     beamPivot.add(beam);
     beam.position.x = 13;
     beamPivot.position.y = 11.7;
     g.add(beamPivot);
     this.beamPivot = beamPivot;
+
+    // real sweeping light inside the rotating pivot: rakes the ground at night
+    this.beamLight = new THREE.SpotLight(0xffd76a, 0, 100, 0.3, 0.55, 1.1);
+    const beamLightTarget = new THREE.Object3D();
+    beamLightTarget.position.set(40, -9, 0);
+    beamPivot.add(this.beamLight, beamLightTarget);
+    this.beamLight.target = beamLightTarget;
 
     // mailbox at the base
     const box = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.55, 0.5), red);
@@ -452,6 +475,13 @@ export class Zones {
   }
 
   /* ---------- runtime ---------- */
+
+  setNight(on) {
+    this.lighthouseLight.intensity = on ? 260 : 0;
+    this.beamLight.intensity = on ? 900 : 0;
+    this.lampMat.emissiveIntensity = on ? 2.8 : 1.6;
+    this.beamMat.opacity = on ? 0.34 : 0.16;
+  }
 
   update(t, dt, vehiclePos, camera) {
     // billboards face the camera

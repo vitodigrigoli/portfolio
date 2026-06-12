@@ -23,13 +23,22 @@ page.on('console', (m) => {
 
 await page.goto('http://localhost:5173', { waitUntil: 'domcontentloaded' });
 
-// 1. loading screen
+// 1. loading screen — title must read VITO / DI GRIGOLI on exactly two lines
 await page.waitForSelector('#start-btn.ready', { timeout: 30000 });
+const titleLines = await page.evaluate(() => {
+  const tops = [...document.querySelectorAll('#loader-title .word')]
+    .map((w) => Math.round(w.getBoundingClientRect().top));
+  return [...new Set(tops)].length;
+});
+console.log('loader title lines:', titleLines, titleLines === 2 ? '(ok)' : '(BAD)');
+if (titleLines !== 2) errors.push(`loader title spans ${titleLines} lines, expected 2`);
 await page.screenshot({ path: `${OUT}/1-loader.png` });
 
 // 2. start → world
 await page.click('#start-btn');
 await page.waitForTimeout(2500);
+const info = await page.evaluate(() => ({ ...window.__vito.renderInfo }));
+console.log('draw calls:', info.calls, '| triangles:', info.triangles);
 await page.screenshot({ path: `${OUT}/2-spawn.png` });
 
 // 3. drive forward, snap a mid-turn shot (lean + steering), then coast
@@ -118,6 +127,15 @@ await page.screenshot({ path: `${OUT}/6b-vespa-rear.png` });
 await page.click('#night-btn');
 await page.waitForTimeout(600);
 await page.screenshot({ path: `${OUT}/7-night.png` });
+// lighthouse glows at night
+await page.evaluate(() => {
+  const v = window.__vito.vehicle;
+  v.position.set(-72, 0, 5);
+  v.heading = -Math.PI / 2; // face west (-x), toward the lighthouse
+  v.speed = 0;
+});
+await page.waitForTimeout(1000);
+await page.screenshot({ path: `${OUT}/7c-lighthouse-night.png` });
 // cart's new spot, at night with headlight
 await page.evaluate(() => {
   const v = window.__vito.vehicle;
@@ -131,6 +149,21 @@ await page.click('#night-btn'); // back to day
 await page.waitForTimeout(400);
 // cart in daylight
 await page.screenshot({ path: `${OUT}/8-cart-day.png` });
+
+// 6e. breakable prickly pear: ram the first breakable collider
+const smash = await page.evaluate(async () => {
+  const { vehicle, world } = window.__vito;
+  const c = world.colliders.find((k) => k.onHit && !k.dead);
+  if (!c) return 'no breakable collider found';
+  vehicle.position.set(c.x + 2.5, 0, c.z);
+  vehicle.heading = Math.atan2(c.x - vehicle.position.x, c.z - vehicle.position.z);
+  vehicle.speed = 14;
+  await new Promise((r) => setTimeout(r, 600));
+  return c.dead === true ? 'smashed (ok)' : 'still intact (BAD)';
+});
+console.log('prickly pear:', smash);
+if (!smash.includes('ok')) errors.push(`prickly pear: ${smash}`);
+await page.screenshot({ path: `${OUT}/9-smash.png` });
 
 // 6. mobile viewport check: loader title wrap + panel above joystick
 const mob = await (await browser.newContext({

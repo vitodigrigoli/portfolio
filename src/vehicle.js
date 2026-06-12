@@ -293,11 +293,18 @@ export class Vehicle {
 
   #resolveCollisions() {
     for (const c of this.colliders) {
+      if (c.dead) continue;
       const dx = this.position.x - c.x;
       const dz = this.position.z - c.z;
       const dist = Math.hypot(dx, dz);
       const minDist = c.r + this.radius;
       if (dist < minDist && dist > 0.0001) {
+        // breakable props shatter instead of blocking when hit with momentum
+        if (c.onHit && Math.abs(this.speed) > 4) {
+          c.onHit();
+          this.speed *= 0.92;
+          continue;
+        }
         const push = (minDist - dist);
         this.position.x += (dx / dist) * push;
         this.position.z += (dz / dist) * push;

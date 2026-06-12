@@ -31,8 +31,30 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(dpr);
 });
+
+// adaptive resolution: if the frame rate sags, step the pixel ratio down
+// (and back up when it recovers) — keeps weak phones smooth
+const maxDpr = Math.min(window.devicePixelRatio, 2);
+let dpr = maxDpr;
+let qFrames = 0;
+let qTime = 0;
+function adaptQuality(dt) {
+  qFrames++;
+  qTime += dt;
+  if (qTime < 2) return;
+  const fps = qFrames / qTime;
+  if (fps < 32 && dpr > 1) {
+    dpr = Math.max(1, dpr - 0.25);
+    renderer.setPixelRatio(dpr);
+  } else if (fps > 55 && dpr < maxDpr) {
+    dpr = Math.min(maxDpr, dpr + 0.25);
+    renderer.setPixelRatio(dpr);
+  }
+  qFrames = 0;
+  qTime = 0;
+}
 
 /* ---------- loading screen ---------- */
 
@@ -47,15 +69,17 @@ if (isTouch) document.body.classList.add('touch');
 loaderHint.textContent = isTouch ? HINTS.mobile : HINTS.desktop;
 
 // split the title into letters for the staggered reveal; letters are grouped
-// per word so line breaks can only happen between words, never inside one
+// per word, with a fixed break after the first name: VITO / DI GRIGOLI
 const titleEl = document.getElementById('loader-title');
 let letterIndex = 0;
-titleEl.innerHTML = titleEl.textContent.trim().split(/\s+/)
-  .map((word) =>
-    `<span class="word">${[...word]
-      .map((ch) => `<span style="--i:${letterIndex++}">${ch}</span>`)
-      .join('')}</span>`)
-  .join('<span class="sp"></span>');
+const wordHtml = (word) =>
+  `<span class="word">${[...word]
+    .map((ch) => `<span style="--i:${letterIndex++}">${ch}</span>`)
+    .join('')}</span>`;
+const [firstName, ...restNames] = titleEl.textContent.trim().split(/\s+/);
+titleEl.innerHTML =
+  wordHtml(firstName) + '<br>' +
+  restNames.map(wordHtml).join('<span class="sp"></span>');
 
 function setProgress(p) {
   const pct = Math.round(p * 100);
@@ -83,6 +107,8 @@ const buildSteps = [
     if (import.meta.env.DEV) {
       window.__vito = {
         get vehicle() { return vehicle; },
+        get world() { return world; },
+        get renderInfo() { return renderer.info.render; },
         topView: (on = true) => { topView = on; },
       };
     }
@@ -130,6 +156,7 @@ nightBtn.addEventListener('click', () => {
   night = !night;
   world.setNight(night);
   vehicle.setNight(night);
+  zones.setNight(night);
   nightBtn.textContent = night ? '☀️' : '🌙';
 });
 
@@ -211,6 +238,7 @@ renderer.setAnimationLoop(() => {
   zones.update(elapsed, dt, vehicle.position, camera);
   ambience.setEngine(vehicle.speed);
   updateCamera(dt);
+  adaptQuality(dt);
 
   renderer.render(scene, camera);
 });

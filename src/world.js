@@ -63,13 +63,17 @@ export class World {
     this.#paths();
     this.#oliveGrove();
     this.#pricklyPears();
+    this.#amphorae();
+    this.#lemonCrates();
     this.#monuments();
     this.#rocks();
     this.#clouds();
   }
 
   addCollider(x, z, r) {
-    this.colliders.push({ x, z, r });
+    const c = { x, z, r };
+    this.colliders.push(c);
+    return c;
   }
 
   update(t, dt) {
@@ -163,7 +167,9 @@ export class World {
     const sun = new THREE.DirectionalLight(0xffdfae, 1.9);
     sun.position.set(-90, 110, -140);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    // phones get a lighter shadow map — biggest single GPU saving
+    const coarse = window.matchMedia('(pointer: coarse)').matches;
+    sun.shadow.mapSize.set(coarse ? 1024 : 2048, coarse ? 1024 : 2048);
     sun.shadow.camera.left = -130;
     sun.shadow.camera.right = 130;
     sun.shadow.camera.top = 130;
@@ -317,9 +323,98 @@ export class World {
     cone.castShadow = true;
     etna.add(cone);
 
-    // smoke puffs drifting from the crater
+    // glowing crater mouth
+    const craterGlow = new THREE.Mesh(
+      new THREE.SphereGeometry(4.0, 10, 8),
+      new THREE.MeshBasicMaterial({ color: 0xff7a26 })
+    );
+    craterGlow.scale.y = 0.4;
+    craterGlow.position.y = H - 2.4;
+    etna.add(craterGlow);
+
+    // flickering eruption light over the summit
+    const lavaLight = new THREE.PointLight(0xff7a2a, 70, 90, 1.6);
+    lavaLight.position.y = H + 2;
+    etna.add(lavaLight);
+
+    // lava flows running down the west flank (facing the play area):
+    // vertex-colored ribbons from bright yellow at the crater to dark
+    // red where they cool off
+    const lavaMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    const cTop = new THREE.Color(0xffe06a);
+    const cMid = new THREE.Color(0xff5a1f);
+    const cBot = new THREE.Color(0x8c1a0e);
+    const tmpLava = new THREE.Color();
+    const mkLava = (azimuth, len, width) => {
+      const SEGS = 7;
+      const pos = [], col = [], idx = [];
+      for (let i = 0; i <= SEGS; i++) {
+        const f = i / SEGS;
+        const slope = 0.1 + f * len;             // 0 = crater, 1 = base
+        const rr = R * slope * 1.1;              // pushed off the jittered rock
+        const y = (1 - slope) * H - 1.0;
+        const a = azimuth + (noise2(i * 3.1, azimuth * 10) - 0.5) * 0.22 * f;
+        const w = (width * (0.3 + 0.8 * f)) / 2;
+        for (const side of [-1, 1]) {
+          const aa = a + (side * w) / Math.max(rr, 0.001);
+          pos.push(Math.cos(aa) * rr, y, Math.sin(aa) * rr);
+          if (f < 0.5) tmpLava.copy(cTop).lerp(cMid, f * 2);
+          else tmpLava.copy(cMid).lerp(cBot, (f - 0.5) * 2);
+          col.push(tmpLava.r, tmpLava.g, tmpLava.b);
+        }
+        if (i < SEGS) {
+          const k = i * 2;
+          idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2);
+        }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      geo.setIndex(idx);
+      etna.add(new THREE.Mesh(geo, lavaMat));
+    };
+    mkLava(2.4, 0.78, 2.6);
+    mkLava(2.95, 0.6, 1.8);
+    mkLava(3.55, 0.7, 2.2);
+
+    // lapilli arcing out of the crater
+    const emberGeo = new THREE.SphereGeometry(0.3, 6, 5);
+    const embers = [];
+    for (let i = 0; i < 9; i++) {
+      const ember = new THREE.Mesh(
+        emberGeo,
+        new THREE.MeshBasicMaterial({ color: 0xffa53a, transparent: true })
+      );
+      ember.userData.seed = rand();
+      ember.userData.az = rand() * Math.PI * 2;
+      ember.userData.spd = 0.55 + rand() * 0.45;
+      etna.add(ember);
+      embers.push(ember);
+    }
+
+    this.animated.push((t) => {
+      lavaLight.intensity = 70 + Math.sin(t * 7.3) * 18 + Math.sin(t * 13.7) * 12;
+      const pulse = 0.86 + Math.sin(t * 5.1) * 0.08 + Math.sin(t * 11.3) * 0.06;
+      lavaMat.color.setScalar(pulse);
+      const gs = 1 + Math.sin(t * 6.4) * 0.05;
+      craterGlow.scale.set(gs, 0.4 * gs, gs);
+      for (const ember of embers) {
+        const f = (t * 0.45 * ember.userData.spd + ember.userData.seed) % 1;
+        const reach = 3 + ember.userData.seed * 7;
+        ember.position.set(
+          Math.cos(ember.userData.az) * reach * f,
+          H - 2 + 15 * f - 17 * f * f,
+          Math.sin(ember.userData.az) * reach * f
+        );
+        const es = 0.6 + (1 - f) * 0.6;
+        ember.scale.setScalar(es);
+        ember.material.opacity = 1 - f * f;
+      }
+    });
+
+    // ash-grey smoke befitting an eruption
     const puffMat = new THREE.MeshBasicMaterial({
-      color: 0xd8d3cf, transparent: true, opacity: 0.55,
+      color: 0xa9a29e, transparent: true, opacity: 0.55,
     });
     const puffGeo = new THREE.IcosahedronGeometry(2.2, 1);
     const puffs = [];
@@ -501,32 +596,30 @@ export class World {
       [22, -2],     // by the cart
     ];
 
+    // identical lamps everywhere → one instanced draw per part
+    const parts = [
+      [new THREE.CylinderGeometry(0.16, 0.22, 0.5, 8), ironM, 0.25],      // base
+      [new THREE.CylinderGeometry(0.06, 0.09, 3.1, 8), ironM, 1.95],      // pole
+      [new THREE.SphereGeometry(0.18, 10, 8), this.bulbMat, 3.62],        // bulb
+      [new THREE.ConeGeometry(0.3, 0.32, 8), ironM, 3.86],                // hood
+      [new THREE.SphereGeometry(0.06, 6, 5), ironM, 4.05],                // finial
+    ];
+    const m = new THREE.Matrix4();
+    for (const [geo, mat, y] of parts) {
+      const inst = new THREE.InstancedMesh(geo, mat, spots.length);
+      inst.castShadow = true;
+      spots.forEach(([x, z], i) => {
+        m.makeTranslation(x, y, z);
+        inst.setMatrixAt(i, m);
+      });
+      this.scene.add(inst);
+    }
+
     for (const [x, z] of spots) {
-      const lamp = new THREE.Group();
-      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 0.5, 8), ironM);
-      base.position.y = 0.25;
-      lamp.add(base);
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 3.1, 8), ironM);
-      pole.position.y = 1.95;
-      lamp.add(pole);
-      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), this.bulbMat);
-      bulb.position.y = 3.62;
-      lamp.add(bulb);
-      const hood = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.32, 8), ironM);
-      hood.position.y = 3.86;
-      lamp.add(hood);
-      const finial = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5), ironM);
-      finial.position.y = 4.05;
-      lamp.add(finial);
-
       const light = new THREE.PointLight(0xffc66a, 0, 17, 1.8);
-      light.position.y = 3.5;
-      lamp.add(light);
+      light.position.set(x, 3.5, z);
+      this.scene.add(light);
       this.nightLights.push(light);
-
-      lamp.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-      lamp.position.set(x, 0, z);
-      this.scene.add(lamp);
       this.addCollider(x, z, 0.4);
     }
   }
@@ -558,7 +651,8 @@ export class World {
   }
 
   #paths() {
-    // dirt paths radiating from the piazza toward each zone
+    // dirt paths radiating from the piazza toward each zone — one
+    // instanced draw for all the patches
     const mat = new THREE.MeshStandardMaterial({ color: 0xcdb389, roughness: 1 });
     const dot = new THREE.CircleGeometry(1.5, 10);
     const targets = [
@@ -567,28 +661,38 @@ export class World {
       { x: 38, z: 27 },    // projects (Siracusa side)
       { x: -84, z: 6 },    // contact (Capo Boeo, west tip)
     ];
-    const meshes = [];
+    const placed = [];
     for (const t of targets) {
       const dist = Math.hypot(t.x, t.z);
       const steps = Math.floor(dist / 4.2);
       for (let i = 3; i <= steps; i++) {
         const f = i / steps;
-        const m = new THREE.Mesh(dot, mat);
-        m.rotation.x = -Math.PI / 2;
-        m.rotation.z = rand() * Math.PI;
         const wobble = (rand() - 0.5) * 2.2;
-        m.position.set(
-          t.x * f + wobble, 0.02 + f * 0.001,
-          t.z * f + wobble
-        );
         const s = 0.7 + rand() * 0.5;
-        m.scale.set(s, s * (0.7 + rand() * 0.4), 1);
-        meshes.push(m);
+        placed.push({
+          x: t.x * f + wobble,
+          y: 0.02 + f * 0.001,
+          z: t.z * f + wobble,
+          rz: rand() * Math.PI,
+          sx: s,
+          sy: s * (0.7 + rand() * 0.4),
+        });
       }
     }
-    const group = new THREE.Group();
-    group.add(...meshes);
-    this.scene.add(group);
+    const dots = new THREE.InstancedMesh(dot, mat, placed.length);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    placed.forEach((p, i) => {
+      e.set(-Math.PI / 2, 0, p.rz);
+      m.compose(
+        new THREE.Vector3(p.x, p.y, p.z),
+        q.setFromEuler(e),
+        new THREE.Vector3(p.sx, p.sy, 1)
+      );
+      dots.setMatrixAt(i, m);
+    });
+    this.scene.add(dots);
   }
 
   /* ---------- vegetation & props ---------- */
@@ -601,7 +705,7 @@ export class World {
 
     const spots = [];
     let guard = 0;
-    while (spots.length < 46 && guard++ < 1600) {
+    while (spots.length < 28 && guard++ < 1600) {
       const a = rand() * Math.PI * 2;
       const rMax = coastRadius(Math.cos(a), Math.sin(a)) - 16;
       const r = 16 + rand() * Math.max(rMax - 16, 0);
@@ -626,7 +730,9 @@ export class World {
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const e = new THREE.Euler();
+    const bp = new THREE.Vector3();
     let bi = 0;
+    const lemonSpots = []; // every other tree is a lemon tree
     spots.forEach((s, i) => {
       const h = 0.85 + rand() * 0.5;
       e.set((rand() - 0.5) * 0.16, rand() * Math.PI, (rand() - 0.5) * 0.16);
@@ -637,23 +743,49 @@ export class World {
       );
       trunks.setMatrixAt(i, m);
 
+      const isLemon = i % 2 === 0;
       for (let b = 0; b < 3; b++) {
         const bs = (0.8 + rand() * 0.7) * h;
         e.set(rand() * 2, rand() * 2, rand() * 2);
-        m.compose(
-          new THREE.Vector3(
-            s.x + (rand() - 0.5) * 1.6 * h,
-            2.6 * h + (rand() - 0.5) * 0.9,
-            s.z + (rand() - 0.5) * 1.6 * h
-          ),
-          q.setFromEuler(e),
-          new THREE.Vector3(bs, bs * 0.82, bs)
+        bp.set(
+          s.x + (rand() - 0.5) * 1.6 * h,
+          2.6 * h + (rand() - 0.5) * 0.9,
+          s.z + (rand() - 0.5) * 1.6 * h
         );
+        m.compose(bp, q.setFromEuler(e), new THREE.Vector3(bs, bs * 0.82, bs));
         blobs.setMatrixAt(bi++, m);
+
+        if (isLemon) {
+          // a couple of lemons peeking out of each foliage blob
+          for (let l = 0; l < 2; l++) {
+            const a = rand() * Math.PI * 2;
+            const elev = (rand() - 0.7) * 1.2;
+            lemonSpots.push({
+              x: bp.x + Math.cos(a) * 1.15 * bs,
+              y: bp.y + elev * 0.8 * bs,
+              z: bp.z + Math.sin(a) * 1.15 * bs,
+              s: 0.8 + rand() * 0.5,
+            });
+          }
+        }
       }
       this.addCollider(s.x, s.z, 0.7);
     });
-    this.scene.add(trunks, blobs);
+
+    const lemonGeo = new THREE.SphereGeometry(0.13, 6, 5);
+    const lemonMat = new THREE.MeshStandardMaterial({ color: 0xf5cf2e, roughness: 0.55 });
+    const lemons = new THREE.InstancedMesh(lemonGeo, lemonMat, lemonSpots.length);
+    lemonSpots.forEach((l, i) => {
+      m.compose(
+        new THREE.Vector3(l.x, l.y, l.z),
+        q.identity(),
+        new THREE.Vector3(l.s, l.s * 1.25, l.s)
+      );
+      lemons.setMatrixAt(i, m);
+    });
+
+    this.scene.add(trunks, blobs, lemons);
+    this.treeSpots = spots; // so the prickly pears can keep their distance
   }
 
   #pricklyPears() {
@@ -664,14 +796,19 @@ export class World {
     const fruitGeo = new THREE.SphereGeometry(0.14, 6, 5);
     const fruitMat = new THREE.MeshStandardMaterial({ color: 0xc23b4e, roughness: 0.7 });
 
-    for (let i = 0; i < 12; i++) {
+    const placed = [];
+    for (let i = 0; i < 110 && placed.length < 32; i++) {
       const a = rand() * Math.PI * 2;
       const rMax = coastRadius(Math.cos(a), Math.sin(a)) - 16;
-      const r = 20 + rand() * Math.max(rMax - 20, 0);
+      const r = 18 + rand() * Math.max(rMax - 18, 0);
       const x = Math.cos(a) * r, z = Math.sin(a) * r;
       if (Math.hypot(x - 38, z - 27) < 27 || Math.hypot(x + 38, z + 18) < 12 ||
-          Math.hypot(x - 52, z + 18) < 30 ||
-          MONUMENTS.some((m) => Math.hypot(x - m.x, z - m.z) < m.r)) continue;
+          Math.hypot(x + 34, z - 24) < 13 || Math.hypot(x + 84, z - 6) < 10 ||
+          Math.hypot(x - 52, z + 18) < 30 || Math.hypot(x - 26, z + 6) < 5 ||
+          MONUMENTS.some((m) => Math.hypot(x - m.x, z - m.z) < m.r) ||
+          placed.some((p) => Math.hypot(p.x - x, p.z - z) < 5.5) ||
+          this.treeSpots.some((s) => Math.hypot(s.x - x, s.z - z) < 3.5)) continue;
+      placed.push({ x, z });
 
       const plant = new THREE.Group();
       const pads = 3 + Math.floor(rand() * 3);
@@ -692,7 +829,176 @@ export class World {
       }
       plant.position.set(x, 0, z);
       this.scene.add(plant);
-      this.addCollider(x, z, 0.8);
+      // breakable: driving into it fast sends the pads flying
+      const collider = this.addCollider(x, z, 0.8);
+      collider.onHit = () => this.#smashProp(plant, collider);
+    }
+  }
+
+  // generic breakable prop: the children burst outward, optional loose
+  // debris (shards, lemons…) bounces on the ground, then the prop
+  // respawns after a while
+  #smashProp(group, collider, debris = null) {
+    collider.dead = true;
+    const pieces = group.children.map((c) => ({
+      obj: c,
+      pos: c.position.clone(),
+      rot: c.rotation.clone(),
+      scl: c.scale.clone(),
+      vel: new THREE.Vector3(
+        c.position.x * 3 + (rand() - 0.5) * 4,
+        5 + rand() * 4,
+        c.position.z * 3 + (rand() - 0.5) * 4
+      ),
+      spin: new THREE.Vector3((rand() - 0.5) * 9, (rand() - 0.5) * 9, (rand() - 0.5) * 9),
+    }));
+
+    // loose debris burst, with a simple ground bounce
+    let burst = null;
+    if (debris) {
+      burst = new THREE.Group();
+      for (let i = 0; i < debris.count; i++) {
+        const d = new THREE.Mesh(debris.geo, debris.mat);
+        const ds = debris.scale * (0.6 + rand() * 0.8);
+        d.scale.setScalar(ds);
+        d.position.set((rand() - 0.5) * 0.8, 0.4 + rand() * 0.8, (rand() - 0.5) * 0.8);
+        d.userData.baseScale = ds;
+        d.userData.vel = new THREE.Vector3((rand() - 0.5) * 9, 4 + rand() * 5, (rand() - 0.5) * 9);
+        d.userData.spin = new THREE.Vector3((rand() - 0.5) * 12, (rand() - 0.5) * 12, (rand() - 0.5) * 12);
+        burst.add(d);
+      }
+      burst.position.copy(group.position);
+      this.scene.add(burst);
+    }
+
+    let phase = 'fly';
+    let age = 0;
+    this.animated.push((_t, dt) => {
+      if (phase === 'done') return;
+      age += dt;
+      if (phase === 'fly') {
+        const s = THREE.MathUtils.clamp(1 - (age - 0.5) * 1.4, 0.001, 1);
+        for (const p of pieces) {
+          p.vel.y -= 22 * dt;
+          p.obj.position.addScaledVector(p.vel, dt);
+          p.obj.rotation.x += p.spin.x * dt;
+          p.obj.rotation.y += p.spin.y * dt;
+          p.obj.rotation.z += p.spin.z * dt;
+          p.obj.scale.copy(p.scl).multiplyScalar(s);
+        }
+        if (burst) {
+          const s2 = THREE.MathUtils.clamp(1 - (age - 0.8) * 1.8, 0.001, 1);
+          for (const d of burst.children) {
+            d.userData.vel.y -= 22 * dt;
+            d.position.addScaledVector(d.userData.vel, dt);
+            if (d.position.y < 0.12) {
+              d.position.y = 0.12;
+              d.userData.vel.y *= -0.35;
+              d.userData.vel.x *= 0.75;
+              d.userData.vel.z *= 0.75;
+            }
+            d.rotation.x += d.userData.spin.x * dt;
+            d.rotation.z += d.userData.spin.z * dt;
+            d.scale.setScalar(d.userData.baseScale * s2);
+          }
+        }
+        if (age > 1.5) {
+          group.visible = false;
+          if (burst) this.scene.remove(burst);
+          phase = 'wait';
+          age = 0;
+        }
+      } else if (phase === 'wait') {
+        if (age > 25) {
+          for (const p of pieces) {
+            p.obj.position.copy(p.pos);
+            p.obj.rotation.copy(p.rot);
+            p.obj.scale.setScalar(0.001);
+          }
+          group.visible = true;
+          phase = 'grow';
+          age = 0;
+        }
+      } else if (phase === 'grow') {
+        const f = Math.min(age / 0.5, 1);
+        const pop = f < 1 ? f * (1 + 0.2 * Math.sin(f * Math.PI)) : 1;
+        for (const p of pieces) p.obj.scale.copy(p.scl).multiplyScalar(pop);
+        if (f === 1) {
+          collider.dead = false;
+          phase = 'done';
+        }
+      }
+    });
+  }
+
+  #amphorae() {
+    // terracotta amphorae clustered along the paths — smash away
+    const terraM = new THREE.MeshStandardMaterial({ color: 0xc06a45, roughness: 0.9, flatShading: true });
+    const profile = [
+      [0.16, 0], [0.3, 0.06], [0.42, 0.42], [0.34, 0.78],
+      [0.17, 0.95], [0.16, 1.06], [0.22, 1.12],
+    ].map(([r, y]) => new THREE.Vector2(r, y));
+    const vaseGeo = new THREE.LatheGeometry(profile, 10);
+    const shardGeo = new THREE.TetrahedronGeometry(1, 0);
+
+    const clusters = [
+      [10.5, -6], [-11, 3],         // piazza edges
+      [-18, -10.8], [-15.8, 13.6],  // beside the about / skills paths
+      [17.8, 15.1], [-54, 6.5],     // beside the projects / contact paths
+    ];
+    for (const [x, z] of clusters) {
+      const g = new THREE.Group();
+      const n = 2 + Math.floor(rand() * 2);
+      for (let i = 0; i < n; i++) {
+        const vase = new THREE.Mesh(vaseGeo, terraM);
+        const s = 0.75 + rand() * 0.6;
+        vase.scale.setScalar(s);
+        vase.position.set((rand() - 0.5) * 1.3, 0, (rand() - 0.5) * 1.3);
+        vase.rotation.y = rand() * Math.PI;
+        vase.castShadow = true;
+        g.add(vase);
+      }
+      g.position.set(x, 0, z);
+      this.scene.add(g);
+      const collider = this.addCollider(x, z, 0.8);
+      collider.onHit = () => this.#smashProp(g, collider, {
+        geo: shardGeo, mat: terraM, count: 9, scale: 0.15,
+      });
+    }
+  }
+
+  #lemonCrates() {
+    // stacked lemon crates near the cart and the artisan stall
+    const woodM = new THREE.MeshStandardMaterial({ color: 0xb98a4e, roughness: 0.95 });
+    const lemonM = new THREE.MeshStandardMaterial({ color: 0xf7d633, roughness: 0.6 });
+    const crateGeo = new THREE.BoxGeometry(0.85, 0.5, 0.85);
+    const heapGeo = new THREE.SphereGeometry(0.4, 8, 6);
+    const lemonGeo = new THREE.SphereGeometry(1, 6, 5);
+
+    const stacks = [
+      { x: 24, z: -8.6, n: 3 },
+      { x: 29, z: -3, n: 2 },
+      { x: 45.5, z: 30, n: 2 },   // by the Artieri market stall
+    ];
+    for (const { x, z, n } of stacks) {
+      const g = new THREE.Group();
+      for (let i = 0; i < n; i++) {
+        const crate = new THREE.Mesh(crateGeo, woodM);
+        crate.position.set((rand() - 0.5) * 0.2, 0.25 + i * 0.52, (rand() - 0.5) * 0.2);
+        crate.rotation.y = (rand() - 0.5) * 0.6;
+        crate.castShadow = true;
+        g.add(crate);
+      }
+      const heap = new THREE.Mesh(heapGeo, lemonM);
+      heap.scale.set(1, 0.55, 1);
+      heap.position.y = n * 0.52 + 0.05;
+      g.add(heap);
+      g.position.set(x, 0, z);
+      this.scene.add(g);
+      const collider = this.addCollider(x, z, 0.8);
+      collider.onHit = () => this.#smashProp(g, collider, {
+        geo: lemonGeo, mat: lemonM, count: 8, scale: 0.13,
+      });
     }
   }
 

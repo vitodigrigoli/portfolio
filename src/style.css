@@ -159,7 +159,7 @@ html, body {
   text-align: center;
   color: var(--paper);
   padding: 0 24px;
-  max-width: 560px;
+  max-width: 760px; /* wide enough for "DI GRIGOLI" on one line */
   width: 100%;
 }
 
